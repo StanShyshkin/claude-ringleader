@@ -13,6 +13,7 @@ set -euo pipefail
 #   -s SLUG      Custom slug for task ID (default: auto-generated)
 #   -m MODEL     Override model (e.g. gpt-4o, o3)
 #   -w WORKER    Worker to use: codex (default), gemini
+#   -r N         Retry up to N times on failure (default: 0)
 #   -a DIR       Additional writable directory (can be repeated)
 #   -c FILE      Context file to include in prompt (can be repeated)
 #   -q           Quiet mode (suppress progress output)
@@ -32,6 +33,7 @@ SLUG=""
 QUIET=false
 MODEL=""
 WORKER="codex"
+MAX_RETRIES=0
 EXTRA_DIRS=()
 CONTEXT_FILES=()
 
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
         -s) SLUG="$2"; shift 2 ;;
         -m) MODEL="$2"; shift 2 ;;
         -w) WORKER="$2"; shift 2 ;;
+        -r) MAX_RETRIES="$2"; shift 2 ;;
         -a) EXTRA_DIRS+=("$(cd "$2" && pwd)"); shift 2 ;;
         -c) CONTEXT_FILES+=("$2"); shift 2 ;;
         -q) QUIET=true; shift ;;
@@ -163,8 +166,72 @@ WORKER_ARGS=("$WORKING_DIR" "${ARTIFACT_DIR}/prompt.md" "$ARTIFACT_DIR" "$LOG_FI
 [[ -n "$MODEL" ]] && WORKER_ARGS+=("$MODEL") || WORKER_ARGS+=("")
 WORKER_ARGS+=("${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}")
 
+# Retry loop
+ATTEMPT=0
 EXIT_CODE=0
-TOKEN_USAGE="$("$WORKER_SCRIPT" "${WORKER_ARGS[@]}")" || EXIT_CODE=$?
+TOKEN_USAGE=""
+TOTAL_ATTEMPTS=1
+
+while true; do
+    ATTEMPT=$((ATTEMPT + 1))
+
+    # On retry: archive previous attempt and augment prompt with error context
+    if [[ "$ATTEMPT" -gt 1 ]]; then
+        PREV_DIR="${ARTIFACT_DIR}/attempt-$((ATTEMPT - 1))"
+        mkdir -p "$PREV_DIR"
+        for f in result.md stderr.log exit_code; do
+            [[ -f "${ARTIFACT_DIR}/$f" ]] && mv "${ARTIFACT_DIR}/$f" "${PREV_DIR}/"
+        done
+
+        # Augment prompt with error context
+        {
+            echo ""
+            echo "--- RETRY (attempt ${ATTEMPT} of $((MAX_RETRIES + 1))) ---"
+            echo "The previous attempt failed."
+            if [[ -f "${PREV_DIR}/stderr.log" ]] && [[ -s "${PREV_DIR}/stderr.log" ]]; then
+                echo ""
+                echo "Stderr from previous attempt:"
+                cat "${PREV_DIR}/stderr.log"
+            fi
+            if [[ -f "${PREV_DIR}/result.md" ]] && [[ -s "${PREV_DIR}/result.md" ]]; then
+                echo ""
+                echo "Partial result from previous attempt:"
+                cat "${PREV_DIR}/result.md"
+            fi
+            echo ""
+            echo "Please fix the issues and complete the original task."
+        } >> "${ARTIFACT_DIR}/prompt.md"
+
+        [[ "$QUIET" == false ]] && echo "Retrying (attempt ${ATTEMPT}/$((MAX_RETRIES + 1)))..." >&2
+    fi
+
+    EXIT_CODE=0
+    ATTEMPT_USAGE="$("$WORKER_SCRIPT" "${WORKER_ARGS[@]}")" || EXIT_CODE=$?
+
+    # Accumulate token usage across attempts
+    if [[ -n "$ATTEMPT_USAGE" ]] && [[ "$ATTEMPT_USAGE" != "{}" ]]; then
+        if [[ -z "$TOKEN_USAGE" ]] || [[ "$TOKEN_USAGE" == "{}" ]]; then
+            TOKEN_USAGE="$ATTEMPT_USAGE"
+        else
+            # Sum token usage from all attempts
+            TOKEN_USAGE="$(python3 -c "
+import json, sys
+a = json.loads(sys.argv[1])
+b = json.loads(sys.argv[2])
+merged = {}
+for k in set(list(a.keys()) + list(b.keys())):
+    merged[k] = a.get(k, 0) + b.get(k, 0)
+print(json.dumps(merged))
+" "$TOKEN_USAGE" "$ATTEMPT_USAGE" 2>/dev/null || echo "$ATTEMPT_USAGE")"
+        fi
+    fi
+
+    TOTAL_ATTEMPTS="$ATTEMPT"
+
+    if [[ "$EXIT_CODE" -eq 0 ]] || [[ "$ATTEMPT" -gt "$MAX_RETRIES" ]]; then
+        break
+    fi
+done
 
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -179,7 +246,7 @@ else
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
-# Write meta.json (TOKEN_USAGE comes from worker's stdout)
+# Write meta.json (TOKEN_USAGE comes from worker's stdout, accumulated across retries)
 EMPTY_JSON="{}"
 python3 -c "
 import json, sys
@@ -190,6 +257,7 @@ meta = {
     'finished_at': sys.argv[4],
     'exit_code': int(sys.argv[5]),
     'working_dir': sys.argv[6],
+    'total_attempts': int(sys.argv[9]),
 }
 try:
     usage = json.loads(sys.argv[7])
@@ -201,7 +269,7 @@ if sys.argv[8]:
     meta['model'] = sys.argv[8]
 print(json.dumps(meta, indent=2))
 " "$TASK_ID" "$WORKER" "$STARTED_AT" "$FINISHED_AT" "$EXIT_CODE" \
-  "$WORKING_DIR" "${TOKEN_USAGE:-$EMPTY_JSON}" "$MODEL" \
+  "$WORKING_DIR" "${TOKEN_USAGE:-$EMPTY_JSON}" "$MODEL" "$TOTAL_ATTEMPTS" \
   > "${ARTIFACT_DIR}/meta.json"
 
 # Final output

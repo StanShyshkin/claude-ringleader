@@ -18,6 +18,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TIMEOUT=300
 MODEL=""
+RETRIES=0
 DRY_RUN=false
 QUIET=false
 
@@ -25,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -t) TIMEOUT="$2"; shift 2 ;;
         -m) MODEL="$2"; shift 2 ;;
+        -r) RETRIES="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         -q) QUIET=true; shift ;;
         --) shift; break ;;
@@ -238,6 +240,7 @@ for i in "${!STEP_NAMES[@]}"; do
     # Build delegate command
     DELEGATE_ARGS=(-d "$STEP_DIR" -t "$TIMEOUT" -s "${STEP_NAME}" -q)
     [[ -n "$MODEL" ]] && DELEGATE_ARGS+=(-m "$MODEL")
+    [[ "$RETRIES" -gt 0 ]] && DELEGATE_ARGS+=(-r "$RETRIES")
 
     # Pass dependency result as context
     if [[ -n "$STEP_DEP" ]]; then

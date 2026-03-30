@@ -99,6 +99,7 @@ bin/delegate.sh -w codex -d /path/to/project "task"             # Explicit worke
 bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable dir
 bin/delegate.sh -c context.md -d /project "task"                # Include context file
 bin/delegate.sh -t 600 -d /path/to/project "long task"          # 10 min timeout
+bin/delegate.sh -r 2 -d /path/to/project "flaky task"          # Retry up to 2 times on failure
 ```
 
 ### Workers
