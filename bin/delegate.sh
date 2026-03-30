@@ -13,6 +13,7 @@ set -euo pipefail
 #   -s SLUG      Custom slug for task ID (default: auto-generated)
 #   -m MODEL     Override codex model (e.g. gpt-4o, o3)
 #   -a DIR       Additional writable directory (can be repeated)
+#   -c FILE      Context file to include in prompt (can be repeated)
 #   -q           Quiet mode (suppress progress output)
 #
 # Outputs:
@@ -30,6 +31,7 @@ SLUG=""
 QUIET=false
 MODEL=""
 EXTRA_DIRS=()
+CONTEXT_FILES=()
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         -s) SLUG="$2"; shift 2 ;;
         -m) MODEL="$2"; shift 2 ;;
         -a) EXTRA_DIRS+=("$(cd "$2" && pwd)"); shift 2 ;;
+        -c) CONTEXT_FILES+=("$2"); shift 2 ;;
         -q) QUIET=true; shift ;;
         --) shift; break ;;
         -*) echo "ERROR: Unknown option: $1" >&2; exit 1 ;;
@@ -113,7 +116,7 @@ ${MODEL:+model: ${MODEL}}
 ${TASK_DESC}
 EOF
 
-# Compose prompt: template preamble + task content
+# Compose prompt: template preamble + task content + context files
 TEMPLATE="${PROJECT_ROOT}/templates/task-prompt.md"
 if [[ -f "$TEMPLATE" ]]; then
     cat "$TEMPLATE" > "${ARTIFACT_DIR}/prompt.md"
@@ -123,6 +126,17 @@ else
     # Fallback if template missing
     echo "$TASK_DESC" > "${ARTIFACT_DIR}/prompt.md"
 fi
+
+# Append context files if provided
+for ctx_file in "${CONTEXT_FILES[@]+"${CONTEXT_FILES[@]}"}"; do
+    if [[ -f "$ctx_file" ]]; then
+        echo "" >> "${ARTIFACT_DIR}/prompt.md"
+        echo "--- CONTEXT FROM: $(basename "$ctx_file") ---" >> "${ARTIFACT_DIR}/prompt.md"
+        cat "$ctx_file" >> "${ARTIFACT_DIR}/prompt.md"
+    else
+        echo "WARNING: Context file not found: ${ctx_file}" >&2
+    fi
+done
 
 # Mark as running
 echo "running" > "${ARTIFACT_DIR}/status.tmp"

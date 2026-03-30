@@ -70,11 +70,33 @@ For the fix template to be used automatically, pipe it:
 cat templates/fix-prompt.md errors.txt | bin/delegate.sh -d /path/to/project -
 ```
 
+### Chaining Context Between Tasks
+
+Pass a previous task's result as context for the next task:
+
+```bash
+TASK1=$(bin/delegate.sh -d /project "Build the schema")
+bin/delegate.sh -d /project -c artifacts/$TASK1/result.md "Now build the API handler using the schema from the previous step"
+```
+
+### Multi-Step Workflows
+
+Write a plan file (see `templates/plan-template.md`) and run all steps in sequence:
+
+```bash
+bin/workflow.sh plan.md                  # Run the plan
+bin/workflow.sh --dry-run plan.md        # Parse and preview without executing
+bin/workflow.sh -t 600 plan.md           # 10 min timeout per step
+```
+
+Steps with `depends_on:` automatically receive their dependency's result as context. Workflow artifacts and summary are written to `artifacts/{workflow-id}/`.
+
 ### Additional delegate.sh Options
 
 ```bash
 bin/delegate.sh -m gpt-4o -d /path/to/project "task"           # Override model
 bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable dir
+bin/delegate.sh -c context.md -d /project "task"                # Include context file
 bin/delegate.sh -t 600 -d /path/to/project "long task"          # 10 min timeout
 ```
 
