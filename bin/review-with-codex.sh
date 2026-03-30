@@ -105,21 +105,10 @@ mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
 [[ "$QUIET" == false ]] && echo "Review ${TASK_ID} started (dir: ${WORKING_DIR}, scope: ${REVIEW_ARGS[*]})" >&2
 
-# Run codex review
-# NOTE: codex review does not allow a [PROMPT] arg when --commit, --base, or
-# --uncommitted is used. Custom instructions via -p are saved to prompt.md for
-# reference but cannot be passed to codex in scoped review mode.
+# Run review via worker
+REVIEW_WORKER="${SCRIPT_DIR}/workers/codex-review.sh"
 EXIT_CODE=0
-# codex review writes its TUI output to stderr, so merge both streams into result.md
-# and keep a separate copy of stderr for debugging.
-(
-    cd "$WORKING_DIR"
-    codex review "${REVIEW_ARGS[@]}" 2>&1
-) > "${ARTIFACT_DIR}/result.md" &
-CODEX_PID=$!
-
-echo "$CODEX_PID" > "${ARTIFACT_DIR}/pid"
-wait "$CODEX_PID" || EXIT_CODE=$?
+"$REVIEW_WORKER" "$WORKING_DIR" "$ARTIFACT_DIR" "${REVIEW_ARGS[@]}" || EXIT_CODE=$?
 
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "$EXIT_CODE" > "${ARTIFACT_DIR}/exit_code"
@@ -137,7 +126,6 @@ cat > "${ARTIFACT_DIR}/meta.json" <<EOF
 {
   "task_id": "${TASK_ID}",
   "type": "review",
-  "pid": ${CODEX_PID},
   "started_at": "${STARTED_AT}",
   "finished_at": "${FINISHED_AT}",
   "exit_code": ${EXIT_CODE},

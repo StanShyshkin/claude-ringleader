@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# delegate.sh -- Delegate a bounded task to Codex CLI
+# delegate.sh -- Delegate a bounded task to a worker CLI
 #
 # Usage:
 #   bin/delegate.sh [OPTIONS] TASK_DESCRIPTION
 #   echo "task text" | bin/delegate.sh [OPTIONS] -
 #
 # Options:
-#   -d DIR       Working directory for codex (default: current directory)
+#   -d DIR       Working directory for the worker (default: current directory)
 #   -t SECONDS   Timeout in seconds (default: 300)
 #   -s SLUG      Custom slug for task ID (default: auto-generated)
-#   -m MODEL     Override codex model (e.g. gpt-4o, o3)
+#   -m MODEL     Override model (e.g. gpt-4o, o3)
+#   -w WORKER    Worker to use: codex (default), gemini
 #   -a DIR       Additional writable directory (can be repeated)
 #   -c FILE      Context file to include in prompt (can be repeated)
 #   -q           Quiet mode (suppress progress output)
@@ -30,6 +31,7 @@ TIMEOUT=300
 SLUG=""
 QUIET=false
 MODEL=""
+WORKER="codex"
 EXTRA_DIRS=()
 CONTEXT_FILES=()
 
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         -t) TIMEOUT="$2"; shift 2 ;;
         -s) SLUG="$2"; shift 2 ;;
         -m) MODEL="$2"; shift 2 ;;
+        -w) WORKER="$2"; shift 2 ;;
         -a) EXTRA_DIRS+=("$(cd "$2" && pwd)"); shift 2 ;;
         -c) CONTEXT_FILES+=("$2"); shift 2 ;;
         -q) QUIET=true; shift ;;
@@ -48,6 +51,17 @@ while [[ $# -gt 0 ]]; do
         *)  break ;;
     esac
 done
+
+# Validate worker exists
+WORKER_SCRIPT="${SCRIPT_DIR}/workers/${WORKER}.sh"
+if [[ ! -x "$WORKER_SCRIPT" ]]; then
+    echo "ERROR: Worker not found or not executable: ${WORKER_SCRIPT}" >&2
+    echo "Available workers:" >&2
+    for w in "${SCRIPT_DIR}"/workers/*.sh; do
+        [[ -x "$w" ]] && echo "  $(basename "$w" .sh)" >&2
+    done
+    exit 1
+fi
 
 # Read task description from args or stdin
 if [[ $# -eq 0 ]]; then
@@ -94,7 +108,6 @@ cleanup() {
             echo "failed" > "${ARTIFACT_DIR}/status.tmp"
             mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
             echo "$rc" > "${ARTIFACT_DIR}/exit_code"
-            date -u +%Y-%m-%dT%H:%M:%SZ > "${ARTIFACT_DIR}/finished_at.tmp"
         fi
     fi
 }
@@ -106,7 +119,7 @@ cat > "${ARTIFACT_DIR}/task.md" <<EOF
 task_id: ${TASK_ID}
 created_at: ${STARTED_AT}
 delegated_by: claude
-worker: codex
+worker: ${WORKER}
 status: pending
 working_dir: ${WORKING_DIR}
 timeout_seconds: ${TIMEOUT}
@@ -142,46 +155,16 @@ done
 echo "running" > "${ARTIFACT_DIR}/status.tmp"
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
-[[ "$QUIET" == false ]] && echo "Task ${TASK_ID} started (timeout: ${TIMEOUT}s, dir: ${WORKING_DIR}${MODEL:+, model: ${MODEL}})" >&2
+[[ "$QUIET" == false ]] && echo "Task ${TASK_ID} started (worker: ${WORKER}, timeout: ${TIMEOUT}s, dir: ${WORKING_DIR}${MODEL:+, model: ${MODEL}})" >&2
 
-# Build codex command
-CODEX_CMD=(
-    codex exec -
-    --full-auto
-    --ephemeral
-    -C "$WORKING_DIR"
-    --skip-git-repo-check
-    -o "${ARTIFACT_DIR}/result.md"
-    --json
-)
+# Invoke the worker
+# Worker interface: WORKING_DIR PROMPT_FILE OUTPUT_DIR LOG_FILE TIMEOUT [MODEL] [EXTRA_DIRS...]
+WORKER_ARGS=("$WORKING_DIR" "${ARTIFACT_DIR}/prompt.md" "$ARTIFACT_DIR" "$LOG_FILE" "$TIMEOUT")
+[[ -n "$MODEL" ]] && WORKER_ARGS+=("$MODEL") || WORKER_ARGS+=("")
+WORKER_ARGS+=("${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}")
 
-# Add model override if specified
-if [[ -n "$MODEL" ]]; then
-    CODEX_CMD+=(-c "model=${MODEL}")
-fi
-
-# Add extra writable directories
-for dir in "${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}"; do
-    CODEX_CMD+=(--add-dir "$dir")
-done
-
-# Store the full command for debugging
-CODEX_CMD_STR="${CODEX_CMD[*]}"
-
-# Run codex, capturing exit code
 EXIT_CODE=0
-timeout "${TIMEOUT}s" "${CODEX_CMD[@]}" \
-    < "${ARTIFACT_DIR}/prompt.md" \
-    > "$LOG_FILE" \
-    2> "${ARTIFACT_DIR}/stderr.log" \
-    &
-CODEX_PID=$!
-
-# Write PID file
-echo "$CODEX_PID" > "${ARTIFACT_DIR}/pid"
-
-# Wait for codex to finish
-wait "$CODEX_PID" || EXIT_CODE=$?
+TOKEN_USAGE="$("$WORKER_SCRIPT" "${WORKER_ARGS[@]}")" || EXIT_CODE=$?
 
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -196,41 +179,29 @@ else
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
-# Extract token usage from JSONL log (last turn.completed event)
-TOKEN_USAGE="{}"
-if [[ -f "$LOG_FILE" ]]; then
-    TOKEN_USAGE="$(python3 -c "
-import json, sys
-usage = {}
-for line in open(sys.argv[1]):
-    try:
-        evt = json.loads(line)
-        if evt.get('type') == 'turn.completed' and 'usage' in evt:
-            usage = evt['usage']
-    except (json.JSONDecodeError, KeyError):
-        pass
-print(json.dumps(usage))
-" "$LOG_FILE" 2>/dev/null || echo "{}")"
-fi
-
-# Write meta.json
+# Write meta.json (TOKEN_USAGE comes from worker's stdout)
+EMPTY_JSON="{}"
 python3 -c "
 import json, sys
 meta = {
     'task_id': sys.argv[1],
-    'pid': int(sys.argv[2]),
+    'worker': sys.argv[2],
     'started_at': sys.argv[3],
     'finished_at': sys.argv[4],
     'exit_code': int(sys.argv[5]),
     'working_dir': sys.argv[6],
-    'command': sys.argv[7],
-    'token_usage': json.loads(sys.argv[8])
 }
-if sys.argv[9]:
-    meta['model'] = sys.argv[9]
+try:
+    usage = json.loads(sys.argv[7])
+    if usage:
+        meta['token_usage'] = usage
+except (json.JSONDecodeError, ValueError):
+    pass
+if sys.argv[8]:
+    meta['model'] = sys.argv[8]
 print(json.dumps(meta, indent=2))
-" "$TASK_ID" "$CODEX_PID" "$STARTED_AT" "$FINISHED_AT" "$EXIT_CODE" \
-  "$WORKING_DIR" "$CODEX_CMD_STR" "$TOKEN_USAGE" "$MODEL" \
+" "$TASK_ID" "$WORKER" "$STARTED_AT" "$FINISHED_AT" "$EXIT_CODE" \
+  "$WORKING_DIR" "${TOKEN_USAGE:-$EMPTY_JSON}" "$MODEL" \
   > "${ARTIFACT_DIR}/meta.json"
 
 # Final output
@@ -238,7 +209,6 @@ if [[ "$EXIT_CODE" -eq 0 ]]; then
     [[ "$QUIET" == false ]] && echo "Task ${TASK_ID} completed successfully." >&2
 else
     [[ "$QUIET" == false ]] && echo "Task ${TASK_ID} failed (exit code: ${EXIT_CODE})." >&2
-    # Print stderr for immediate debugging
     if [[ -s "${ARTIFACT_DIR}/stderr.log" ]]; then
         [[ "$QUIET" == false ]] && echo "--- stderr ---" >&2
         [[ "$QUIET" == false ]] && tail -20 "${ARTIFACT_DIR}/stderr.log" >&2

@@ -95,10 +95,21 @@ Steps with `depends_on:` automatically receive their dependency's result as cont
 
 ```bash
 bin/delegate.sh -m gpt-4o -d /path/to/project "task"           # Override model
+bin/delegate.sh -w codex -d /path/to/project "task"             # Explicit worker (default: codex)
 bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable dir
 bin/delegate.sh -c context.md -d /project "task"                # Include context file
 bin/delegate.sh -t 600 -d /path/to/project "long task"          # 10 min timeout
 ```
+
+### Workers
+
+Workers live in `bin/workers/`. Each implements a standard interface:
+- **codex.sh** -- Codex CLI via `codex exec` (default)
+- **codex-review.sh** -- Codex CLI code review via `codex review`
+- **gemini.sh** -- Gemini CLI (stub, not yet implemented)
+
+To add a new worker, create `bin/workers/<name>.sh` implementing the interface
+documented in `bin/workers/codex.sh`, then use it with `bin/delegate.sh -w <name>`.
 
 ### Listing and Cleanup
 
