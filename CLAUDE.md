@@ -111,7 +111,7 @@ Workers live in `bin/workers/`. Each implements a standard interface:
 To add a new worker, create `bin/workers/<name>.sh` implementing the interface
 documented in `bin/workers/codex.sh`, then use it with `bin/delegate.sh -w <name>`.
 
-### Listing and Cleanup
+### Listing, Cleanup, and Cost
 
 ```bash
 bin/list-tasks.sh                 # Show all tasks
@@ -119,6 +119,9 @@ bin/list-tasks.sh --running       # Show only running tasks
 bin/list-tasks.sh --failed        # Show only failed tasks
 bin/cleanup.sh --dry-run          # Preview cleanup
 bin/cleanup.sh --days 3           # Remove tasks older than 3 days
+bin/cost.sh                       # Aggregate token usage and cost
+bin/cost.sh --today               # Today's usage only
+bin/cost.sh --days 7 --json       # Last 7 days, JSON output
 ```
 
 ## Reading Results
