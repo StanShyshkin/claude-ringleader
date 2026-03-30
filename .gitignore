@@ -1,0 +1,9 @@
+# Task artifacts (generated per-task, not version controlled)
+artifacts/*/
+
+# Event logs
+logs/*.jsonl
+
+# Keep directory structure
+!artifacts/.gitkeep
+!logs/.gitkeep
