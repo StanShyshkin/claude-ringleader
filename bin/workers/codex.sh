@@ -54,6 +54,11 @@ for dir in "${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}"; do
     CODEX_CMD+=(--add-dir "$dir")
 done
 
+# Structured output schema (opt-in via environment variable)
+if [[ -n "${CODEX_OUTPUT_SCHEMA:-}" ]]; then
+    CODEX_CMD+=(--output-schema "$CODEX_OUTPUT_SCHEMA")
+fi
+
 # Run codex
 EXIT_CODE=0
 timeout "${TIMEOUT}s" "${CODEX_CMD[@]}" \

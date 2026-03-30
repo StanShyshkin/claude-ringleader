@@ -14,6 +14,7 @@ set -euo pipefail
 #   -m MODEL     Override model (e.g. gpt-4o, o3)
 #   -w WORKER    Worker to use: codex (default), gemini
 #   -r N         Retry up to N times on failure (default: 0)
+#   -S FILE      JSON schema for structured output (opt-in)
 #   -a DIR       Additional writable directory (can be repeated)
 #   -c FILE      Context file to include in prompt (can be repeated)
 #   -q           Quiet mode (suppress progress output)
@@ -34,6 +35,7 @@ QUIET=false
 MODEL=""
 WORKER="codex"
 MAX_RETRIES=0
+SCHEMA_FILE=""
 EXTRA_DIRS=()
 CONTEXT_FILES=()
 
@@ -46,6 +48,7 @@ while [[ $# -gt 0 ]]; do
         -m) MODEL="$2"; shift 2 ;;
         -w) WORKER="$2"; shift 2 ;;
         -r) MAX_RETRIES="$2"; shift 2 ;;
+        -S) SCHEMA_FILE="$2"; shift 2 ;;
         -a) EXTRA_DIRS+=("$(cd "$2" && pwd)"); shift 2 ;;
         -c) CONTEXT_FILES+=("$2"); shift 2 ;;
         -q) QUIET=true; shift ;;
@@ -162,6 +165,9 @@ mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
 # Invoke the worker
 # Worker interface: WORKING_DIR PROMPT_FILE OUTPUT_DIR LOG_FILE TIMEOUT [MODEL] [EXTRA_DIRS...]
+# Structured output schema passed via environment variable (opt-in, ignored by workers that don't support it)
+[[ -n "$SCHEMA_FILE" ]] && export CODEX_OUTPUT_SCHEMA="$SCHEMA_FILE"
+
 WORKER_ARGS=("$WORKING_DIR" "${ARTIFACT_DIR}/prompt.md" "$ARTIFACT_DIR" "$LOG_FILE" "$TIMEOUT")
 [[ -n "$MODEL" ]] && WORKER_ARGS+=("$MODEL") || WORKER_ARGS+=("")
 WORKER_ARGS+=("${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}")

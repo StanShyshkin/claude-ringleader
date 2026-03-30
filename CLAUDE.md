@@ -100,7 +100,11 @@ bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable
 bin/delegate.sh -c context.md -d /project "task"                # Include context file
 bin/delegate.sh -t 600 -d /path/to/project "long task"          # 10 min timeout
 bin/delegate.sh -r 2 -d /path/to/project "flaky task"          # Retry up to 2 times on failure
+bin/delegate.sh -S templates/result-schema.json -d /project "task"  # Structured JSON output
 ```
+
+Note: `-S` (structured output) is best for analysis tasks (review, summarize, classify).
+For implementation tasks that modify files, use the default freeform output.
 
 ### Workers
 

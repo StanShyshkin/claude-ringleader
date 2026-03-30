@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "One-line summary of what was done"
+    },
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of file paths created or modified"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed", "blocked"],
+      "description": "Task completion status"
+    },
+    "issues": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Any problems encountered"
+    },
+    "next_steps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Suggested follow-up actions"
+    }
+  },
+  "required": ["summary", "status", "files_changed", "issues", "next_steps"],
+  "additionalProperties": false
+}
