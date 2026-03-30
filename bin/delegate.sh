@@ -11,6 +11,8 @@ set -euo pipefail
 #   -d DIR       Working directory for codex (default: current directory)
 #   -t SECONDS   Timeout in seconds (default: 300)
 #   -s SLUG      Custom slug for task ID (default: auto-generated)
+#   -m MODEL     Override codex model (e.g. gpt-4o, o3)
+#   -a DIR       Additional writable directory (can be repeated)
 #   -q           Quiet mode (suppress progress output)
 #
 # Outputs:
@@ -26,6 +28,8 @@ WORKING_DIR="$(pwd)"
 TIMEOUT=300
 SLUG=""
 QUIET=false
+MODEL=""
+EXTRA_DIRS=()
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -33,6 +37,8 @@ while [[ $# -gt 0 ]]; do
         -d) WORKING_DIR="$(cd "$2" && pwd)"; shift 2 ;;
         -t) TIMEOUT="$2"; shift 2 ;;
         -s) SLUG="$2"; shift 2 ;;
+        -m) MODEL="$2"; shift 2 ;;
+        -a) EXTRA_DIRS+=("$(cd "$2" && pwd)"); shift 2 ;;
         -q) QUIET=true; shift ;;
         --) shift; break ;;
         -*) echo "ERROR: Unknown option: $1" >&2; exit 1 ;;
@@ -75,6 +81,22 @@ mkdir -p "$ARTIFACT_DIR"
 LOG_FILE="${PROJECT_ROOT}/logs/${TASK_ID}.jsonl"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# EXIT trap: ensure status is always written on unexpected termination
+cleanup() {
+    local rc=$?
+    if [[ -d "$ARTIFACT_DIR" ]] && [[ -f "${ARTIFACT_DIR}/status" ]]; then
+        local current_status
+        current_status="$(cat "${ARTIFACT_DIR}/status")"
+        if [[ "$current_status" == "running" ]]; then
+            echo "failed" > "${ARTIFACT_DIR}/status.tmp"
+            mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
+            echo "$rc" > "${ARTIFACT_DIR}/exit_code"
+            date -u +%Y-%m-%dT%H:%M:%SZ > "${ARTIFACT_DIR}/finished_at.tmp"
+        fi
+    fi
+}
+trap cleanup EXIT
+
 # Write task.md
 cat > "${ARTIFACT_DIR}/task.md" <<EOF
 ---
@@ -85,6 +107,7 @@ worker: codex
 status: pending
 working_dir: ${WORKING_DIR}
 timeout_seconds: ${TIMEOUT}
+${MODEL:+model: ${MODEL}}
 ---
 
 ${TASK_DESC}
@@ -105,7 +128,7 @@ fi
 echo "running" > "${ARTIFACT_DIR}/status.tmp"
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
-[[ "$QUIET" == false ]] && echo "Task ${TASK_ID} started (timeout: ${TIMEOUT}s, dir: ${WORKING_DIR})" >&2
+[[ "$QUIET" == false ]] && echo "Task ${TASK_ID} started (timeout: ${TIMEOUT}s, dir: ${WORKING_DIR}${MODEL:+, model: ${MODEL}})" >&2
 
 # Build codex command
 CODEX_CMD=(
@@ -118,7 +141,17 @@ CODEX_CMD=(
     --json
 )
 
-# Store PID info and the full command for debugging
+# Add model override if specified
+if [[ -n "$MODEL" ]]; then
+    CODEX_CMD+=(-c "model=${MODEL}")
+fi
+
+# Add extra writable directories
+for dir in "${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}"; do
+    CODEX_CMD+=(--add-dir "$dir")
+done
+
+# Store the full command for debugging
 CODEX_CMD_STR="${CODEX_CMD[*]}"
 
 # Run codex, capturing exit code
@@ -149,18 +182,42 @@ else
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 
+# Extract token usage from JSONL log (last turn.completed event)
+TOKEN_USAGE="{}"
+if [[ -f "$LOG_FILE" ]]; then
+    TOKEN_USAGE="$(python3 -c "
+import json, sys
+usage = {}
+for line in open(sys.argv[1]):
+    try:
+        evt = json.loads(line)
+        if evt.get('type') == 'turn.completed' and 'usage' in evt:
+            usage = evt['usage']
+    except (json.JSONDecodeError, KeyError):
+        pass
+print(json.dumps(usage))
+" "$LOG_FILE" 2>/dev/null || echo "{}")"
+fi
+
 # Write meta.json
-cat > "${ARTIFACT_DIR}/meta.json" <<EOF
-{
-  "task_id": "${TASK_ID}",
-  "pid": ${CODEX_PID},
-  "started_at": "${STARTED_AT}",
-  "finished_at": "${FINISHED_AT}",
-  "exit_code": ${EXIT_CODE},
-  "working_dir": "${WORKING_DIR}",
-  "command": "${CODEX_CMD_STR}"
+python3 -c "
+import json, sys
+meta = {
+    'task_id': sys.argv[1],
+    'pid': int(sys.argv[2]),
+    'started_at': sys.argv[3],
+    'finished_at': sys.argv[4],
+    'exit_code': int(sys.argv[5]),
+    'working_dir': sys.argv[6],
+    'command': sys.argv[7],
+    'token_usage': json.loads(sys.argv[8])
 }
-EOF
+if sys.argv[9]:
+    meta['model'] = sys.argv[9]
+print(json.dumps(meta, indent=2))
+" "$TASK_ID" "$CODEX_PID" "$STARTED_AT" "$FINISHED_AT" "$EXIT_CODE" \
+  "$WORKING_DIR" "$CODEX_CMD_STR" "$TOKEN_USAGE" "$MODEL" \
+  > "${ARTIFACT_DIR}/meta.json"
 
 # Final output
 if [[ "$EXIT_CODE" -eq 0 ]]; then

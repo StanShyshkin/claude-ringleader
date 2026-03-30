@@ -48,6 +48,46 @@ bin/result.sh TASK_ID
 echo "Detailed multi-line task description..." | bin/delegate.sh -d /path/to/project -
 ```
 
+### Code Review
+
+```bash
+bin/review-with-codex.sh --uncommitted -d /path/to/project
+bin/review-with-codex.sh --base main -d /path/to/project
+bin/review-with-codex.sh --commit abc123 -d /path/to/project
+```
+
+### Fixing Errors
+
+Use the fix template with delegate.sh. Paste the error output as context:
+
+```bash
+bin/delegate.sh -d /path/to/project "Fix the following test failures: <paste errors>"
+```
+
+For the fix template to be used automatically, pipe it:
+
+```bash
+cat templates/fix-prompt.md errors.txt | bin/delegate.sh -d /path/to/project -
+```
+
+### Additional delegate.sh Options
+
+```bash
+bin/delegate.sh -m gpt-4o -d /path/to/project "task"           # Override model
+bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable dir
+bin/delegate.sh -t 600 -d /path/to/project "long task"          # 10 min timeout
+```
+
+### Listing and Cleanup
+
+```bash
+bin/list-tasks.sh                 # Show all tasks
+bin/list-tasks.sh --running       # Show only running tasks
+bin/list-tasks.sh --failed        # Show only failed tasks
+bin/cleanup.sh --dry-run          # Preview cleanup
+bin/cleanup.sh --days 3           # Remove tasks older than 3 days
+```
+
 ## Reading Results
 
 ```bash
@@ -77,7 +117,7 @@ All task artifacts live in `artifacts/{task-id}/`:
 - `prompt.md` -- Full prompt sent to codex (template + task)
 - `result.md` -- Codex's final message
 - `status` -- `running`, `completed`, or `failed`
-- `meta.json` -- Timing, PID, exit code, command
+- `meta.json` -- Timing, PID, exit code, command, token usage
 - `stderr.log` -- Error output (empty on success)
 - `pid` -- Process ID (while running)
 - `exit_code` -- Numeric exit code
