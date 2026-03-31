@@ -8,9 +8,12 @@ set -euo pipefail
 # Options:
 #   -t SECONDS   Per-step timeout (default: 300)
 #   -m MODEL     Override model for all steps
+#   -r N         Retry failed steps up to N times
 #   --dry-run    Parse and print the plan without executing
 #   -q           Quiet mode
 #
+# Steps without dependencies run in parallel (wave-based execution).
+# Steps with depends_on wait for all dependencies to complete first.
 # Plan file format: see templates/plan-template.md
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,13 +52,11 @@ fi
 
 # --- Parse the plan file ---
 
-# Global working_dir (can be overridden per step)
 GLOBAL_WORKING_DIR=""
 
-# Arrays to hold parsed steps (parallel arrays, indexed by step number)
 STEP_NAMES=()
 STEP_TASKS=()
-STEP_DEPENDS=()
+STEP_DEPENDS=()  # comma-separated dependency list
 STEP_TYPES=()
 STEP_DIRS=()
 
@@ -68,7 +69,6 @@ in_task=false
 
 flush_step() {
     if [[ -n "$current_step" ]]; then
-        # Trim leading/trailing whitespace from task
         current_task="$(echo "$current_task" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         if [[ -z "$current_task" ]]; then
             echo "ERROR: Step '${current_step}' has no task description." >&2
@@ -89,11 +89,9 @@ flush_step() {
 }
 
 while IFS= read -r line || [[ -n "$line" ]]; do
-    # Skip comments and blank lines at top level
     [[ "$line" =~ ^#[^#] ]] && continue
-    [[ "$line" =~ ^---$ ]] && break  # Stop at notes section
+    [[ "$line" =~ ^---$ ]] && break
 
-    # Global working_dir (before any step)
     if [[ ${#STEP_NAMES[@]} -eq 0 ]] && [[ -z "$current_step" ]]; then
         if [[ "$line" =~ ^working_dir:[[:space:]]*(.*) ]]; then
             GLOBAL_WORKING_DIR="${BASH_REMATCH[1]}"
@@ -101,14 +99,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         fi
     fi
 
-    # Step header
     if [[ "$line" =~ ^##[[:space:]]+step:[[:space:]]*(.*) ]]; then
         flush_step
         current_step="${BASH_REMATCH[1]}"
         continue
     fi
 
-    # Inside a step: parse fields
     if [[ -n "$current_step" ]]; then
         if [[ "$line" =~ ^depends_on:[[:space:]]*(.*) ]]; then
             current_depends="${BASH_REMATCH[1]}"
@@ -130,7 +126,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             in_task=true
             continue
         fi
-        # Continuation lines for task
         if [[ "$in_task" == true ]] && [[ -n "$line" ]]; then
             current_task="${current_task}"$'\n'"${line}"
             continue
@@ -138,7 +133,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
 done < "$PLAN_FILE"
 
-# Flush last step
 flush_step
 
 NUM_STEPS=${#STEP_NAMES[@]}
@@ -150,7 +144,6 @@ fi
 
 # --- Validate ---
 
-# Check for duplicate step names
 declare -A seen_names
 for name in "${STEP_NAMES[@]}"; do
     if [[ -v "seen_names[$name]" ]]; then
@@ -160,21 +153,76 @@ for name in "${STEP_NAMES[@]}"; do
     seen_names["$name"]=1
 done
 
-# Check dependencies reference valid steps
+# Validate dependencies (comma-separated)
 for i in "${!STEP_DEPENDS[@]}"; do
-    dep="${STEP_DEPENDS[$i]}"
-    if [[ -n "$dep" ]] && [[ ! -v "seen_names[$dep]" ]]; then
-        echo "ERROR: Step '${STEP_NAMES[$i]}' depends on unknown step '${dep}'." >&2
-        exit 1
-    fi
+    deps="${STEP_DEPENDS[$i]}"
+    [[ -z "$deps" ]] && continue
+    IFS=',' read -ra dep_list <<< "$deps"
+    for dep in "${dep_list[@]}"; do
+        dep="$(echo "$dep" | xargs)"  # trim whitespace
+        if [[ ! -v "seen_names[$dep]" ]]; then
+            echo "ERROR: Step '${STEP_NAMES[$i]}' depends on unknown step '${dep}'." >&2
+            exit 1
+        fi
+    done
 done
 
-# Check all steps have a working directory
 for i in "${!STEP_NAMES[@]}"; do
     if [[ -z "${STEP_DIRS[$i]}" ]]; then
         echo "ERROR: Step '${STEP_NAMES[$i]}' has no working_dir (and no global default)." >&2
         exit 1
     fi
+done
+
+# --- Compute waves for parallel execution ---
+
+declare -A STEP_WAVE
+declare -A STEP_INDEX  # name -> index
+
+for i in "${!STEP_NAMES[@]}"; do
+    STEP_INDEX["${STEP_NAMES[$i]}"]="$i"
+done
+
+# Iterative topological wave assignment
+changed=true
+while [[ "$changed" == true ]]; do
+    changed=false
+    for i in "${!STEP_NAMES[@]}"; do
+        name="${STEP_NAMES[$i]}"
+        [[ -v "STEP_WAVE[$name]" ]] && continue
+
+        deps="${STEP_DEPENDS[$i]}"
+        if [[ -z "$deps" ]]; then
+            STEP_WAVE["$name"]=0
+            changed=true
+            continue
+        fi
+
+        max_dep_wave=-1
+        all_resolved=true
+        IFS=',' read -ra dep_list <<< "$deps"
+        for dep in "${dep_list[@]}"; do
+            dep="$(echo "$dep" | xargs)"
+            if [[ -v "STEP_WAVE[$dep]" ]]; then
+                w="${STEP_WAVE[$dep]}"
+                [[ "$w" -gt "$max_dep_wave" ]] && max_dep_wave="$w"
+            else
+                all_resolved=false
+                break
+            fi
+        done
+
+        if [[ "$all_resolved" == true ]]; then
+            STEP_WAVE["$name"]=$((max_dep_wave + 1))
+            changed=true
+        fi
+    done
+done
+
+# Find max wave
+MAX_WAVE=0
+for w in "${STEP_WAVE[@]}"; do
+    [[ "$w" -gt "$MAX_WAVE" ]] && MAX_WAVE="$w"
 done
 
 # --- Print plan ---
@@ -183,99 +231,151 @@ log() {
     [[ "$QUIET" == false ]] && echo "$@" >&2
 }
 
-log "=== Workflow: ${NUM_STEPS} steps ==="
-for i in "${!STEP_NAMES[@]}"; do
-    dep_info=""
-    [[ -n "${STEP_DEPENDS[$i]}" ]] && dep_info=" (after: ${STEP_DEPENDS[$i]})"
-    log "  [$((i+1))] ${STEP_NAMES[$i]}${dep_info} [${STEP_TYPES[$i]}]"
+log "=== Workflow: ${NUM_STEPS} steps, $((MAX_WAVE + 1)) wave(s) ==="
+for wave in $(seq 0 "$MAX_WAVE"); do
+    log "  Wave ${wave}:"
+    for i in "${!STEP_NAMES[@]}"; do
+        name="${STEP_NAMES[$i]}"
+        [[ "${STEP_WAVE[$name]}" -eq "$wave" ]] || continue
+        dep_info=""
+        [[ -n "${STEP_DEPENDS[$i]}" ]] && dep_info=" (after: ${STEP_DEPENDS[$i]})"
+        log "    ${name}${dep_info} [${STEP_TYPES[$i]}]"
+    done
 done
 log ""
 
 if [[ "$DRY_RUN" == true ]]; then
-    echo "Dry run -- plan parsed successfully. ${NUM_STEPS} steps."
-    for i in "${!STEP_NAMES[@]}"; do
+    echo "Dry run -- plan parsed successfully. ${NUM_STEPS} steps, $((MAX_WAVE + 1)) wave(s)."
+    for wave in $(seq 0 "$MAX_WAVE"); do
         echo ""
-        echo "Step $((i+1)): ${STEP_NAMES[$i]}"
-        echo "  Type: ${STEP_TYPES[$i]}"
-        echo "  Dir:  ${STEP_DIRS[$i]}"
-        [[ -n "${STEP_DEPENDS[$i]}" ]] && echo "  After: ${STEP_DEPENDS[$i]}"
-        echo "  Task: ${STEP_TASKS[$i]}"
+        echo "Wave ${wave}:"
+        for i in "${!STEP_NAMES[@]}"; do
+            name="${STEP_NAMES[$i]}"
+            [[ "${STEP_WAVE[$name]}" -eq "$wave" ]] || continue
+            echo "  Step: ${name}"
+            echo "    Type: ${STEP_TYPES[$i]}"
+            echo "    Dir:  ${STEP_DIRS[$i]}"
+            [[ -n "${STEP_DEPENDS[$i]}" ]] && echo "    After: ${STEP_DEPENDS[$i]}"
+            echo "    Task: ${STEP_TASKS[$i]}"
+        done
     done
     exit 0
 fi
 
-# --- Execute steps ---
+# --- Execute steps wave by wave ---
 
-# Create a workflow artifact directory
 WORKFLOW_ID="$(date -u +%Y%m%d-%H%M%S)-workflow"
 WORKFLOW_DIR="${PROJECT_ROOT}/artifacts/${WORKFLOW_ID}"
 mkdir -p "$WORKFLOW_DIR"
 
-# Track step results: step_name -> task_id
 declare -A STEP_TASK_IDS
 declare -A STEP_STATUSES
 
 WORKFLOW_FAILED=false
 
-for i in "${!STEP_NAMES[@]}"; do
-    STEP_NAME="${STEP_NAMES[$i]}"
-    STEP_TASK="${STEP_TASKS[$i]}"
-    STEP_TYPE="${STEP_TYPES[$i]}"
-    STEP_DIR="${STEP_DIRS[$i]}"
-    STEP_DEP="${STEP_DEPENDS[$i]}"
+for wave in $(seq 0 "$MAX_WAVE"); do
+    # Collect steps in this wave
+    WAVE_STEPS=()
+    for i in "${!STEP_NAMES[@]}"; do
+        [[ "${STEP_WAVE[${STEP_NAMES[$i]}]}" -eq "$wave" ]] && WAVE_STEPS+=("$i")
+    done
 
-    log "--- Step $((i+1))/${NUM_STEPS}: ${STEP_NAME} ---"
+    [[ ${#WAVE_STEPS[@]} -eq 0 ]] && continue
 
-    # Check if dependency failed
-    if [[ -n "$STEP_DEP" ]]; then
-        DEP_STATUS="${STEP_STATUSES[$STEP_DEP]:-unknown}"
-        if [[ "$DEP_STATUS" != "completed" ]]; then
-            log "SKIPPED: dependency '${STEP_DEP}' did not complete (status: ${DEP_STATUS})."
-            STEP_STATUSES["$STEP_NAME"]="skipped"
-            echo "skipped (dependency '${STEP_DEP}' ${DEP_STATUS})" > "${WORKFLOW_DIR}/${STEP_NAME}.status"
-            continue
-        fi
-    fi
-
-    # Build delegate command
-    DELEGATE_ARGS=(-d "$STEP_DIR" -t "$TIMEOUT" -s "${STEP_NAME}" -q)
-    [[ -n "$MODEL" ]] && DELEGATE_ARGS+=(-m "$MODEL")
-    [[ "$RETRIES" -gt 0 ]] && DELEGATE_ARGS+=(-r "$RETRIES")
-
-    # Pass dependency result as context
-    if [[ -n "$STEP_DEP" ]]; then
-        DEP_TASK_ID="${STEP_TASK_IDS[$STEP_DEP]}"
-        DEP_RESULT="${PROJECT_ROOT}/artifacts/${DEP_TASK_ID}/result.md"
-        if [[ -f "$DEP_RESULT" ]]; then
-            DELEGATE_ARGS+=(-c "$DEP_RESULT")
-        fi
-    fi
-
-    # Execute
-    STEP_EXIT=0
-    if [[ "$STEP_TYPE" == "review" ]]; then
-        # Review steps use review-with-codex.sh
-        REVIEW_ARGS=(-d "$STEP_DIR" -s "${STEP_NAME}" -q --uncommitted)
-        TASK_ID="$("${SCRIPT_DIR}/review-with-codex.sh" "${REVIEW_ARGS[@]}")" || STEP_EXIT=$?
+    WAVE_SIZE=${#WAVE_STEPS[@]}
+    if [[ "$WAVE_SIZE" -gt 1 ]]; then
+        log "--- Wave ${wave}: ${WAVE_SIZE} steps in parallel ---"
     else
-        # Normal delegation
-        TASK_ID="$(echo "$STEP_TASK" | "${SCRIPT_DIR}/delegate.sh" "${DELEGATE_ARGS[@]}" -- -)" || STEP_EXIT=$?
+        log "--- Wave ${wave}: ${STEP_NAMES[${WAVE_STEPS[0]}]} ---"
     fi
 
-    STEP_TASK_IDS["$STEP_NAME"]="$TASK_ID"
+    # Launch all steps in this wave
+    declare -A WAVE_PIDS
 
-    if [[ "$STEP_EXIT" -eq 0 ]]; then
-        STEP_STATUSES["$STEP_NAME"]="completed"
-        log "COMPLETED: ${STEP_NAME} -> ${TASK_ID}"
-    else
-        STEP_STATUSES["$STEP_NAME"]="failed"
-        log "FAILED: ${STEP_NAME} -> ${TASK_ID} (exit: ${STEP_EXIT})"
-        WORKFLOW_FAILED=true
-    fi
+    for i in "${WAVE_STEPS[@]}"; do
+        STEP_NAME="${STEP_NAMES[$i]}"
+        STEP_TASK="${STEP_TASKS[$i]}"
+        STEP_TYPE="${STEP_TYPES[$i]}"
+        STEP_DIR="${STEP_DIRS[$i]}"
+        STEP_DEPS="${STEP_DEPENDS[$i]}"
 
-    # Record in workflow dir
-    echo "${STEP_STATUSES[$STEP_NAME]}" > "${WORKFLOW_DIR}/${STEP_NAME}.status"
-    echo "$TASK_ID" > "${WORKFLOW_DIR}/${STEP_NAME}.task_id"
+        # Check if any dependency failed -> skip
+        SKIP=false
+        if [[ -n "$STEP_DEPS" ]]; then
+            IFS=',' read -ra dep_list <<< "$STEP_DEPS"
+            for dep in "${dep_list[@]}"; do
+                dep="$(echo "$dep" | xargs)"
+                DEP_STATUS="${STEP_STATUSES[$dep]:-unknown}"
+                if [[ "$DEP_STATUS" != "completed" ]]; then
+                    log "  SKIPPED: ${STEP_NAME} (dependency '${dep}' ${DEP_STATUS})"
+                    STEP_STATUSES["$STEP_NAME"]="skipped"
+                    echo "skipped" > "${WORKFLOW_DIR}/${STEP_NAME}.status"
+                    echo "n/a" > "${WORKFLOW_DIR}/${STEP_NAME}.task_id"
+                    echo "1" > "${WORKFLOW_DIR}/${STEP_NAME}.exit_code"
+                    SKIP=true
+                    break
+                fi
+            done
+        fi
+        [[ "$SKIP" == true ]] && continue
+
+        # Launch in background subshell
+        (
+            # Build delegate command
+            DELEGATE_ARGS=(-d "$STEP_DIR" -t "$TIMEOUT" -s "${STEP_NAME}" -q)
+            [[ -n "$MODEL" ]] && DELEGATE_ARGS+=(-m "$MODEL")
+            [[ "$RETRIES" -gt 0 ]] && DELEGATE_ARGS+=(-r "$RETRIES")
+
+            # Pass all dependency results as context
+            if [[ -n "$STEP_DEPS" ]]; then
+                IFS=',' read -ra dep_list <<< "$STEP_DEPS"
+                for dep in "${dep_list[@]}"; do
+                    dep="$(echo "$dep" | xargs)"
+                    DEP_TASK_ID="$(cat "${WORKFLOW_DIR}/${dep}.task_id" 2>/dev/null || echo "")"
+                    if [[ -n "$DEP_TASK_ID" ]] && [[ "$DEP_TASK_ID" != "n/a" ]]; then
+                        DEP_RESULT="${PROJECT_ROOT}/artifacts/${DEP_TASK_ID}/result.md"
+                        [[ -f "$DEP_RESULT" ]] && DELEGATE_ARGS+=(-c "$DEP_RESULT")
+                    fi
+                done
+            fi
+
+            # Execute
+            STEP_EXIT=0
+            if [[ "$STEP_TYPE" == "review" ]]; then
+                REVIEW_ARGS=(-d "$STEP_DIR" -s "${STEP_NAME}" -q --uncommitted)
+                TASK_ID="$("${SCRIPT_DIR}/review-with-codex.sh" "${REVIEW_ARGS[@]}")" || STEP_EXIT=$?
+            else
+                TASK_ID="$(echo "$STEP_TASK" | "${SCRIPT_DIR}/delegate.sh" "${DELEGATE_ARGS[@]}" -- -)" || STEP_EXIT=$?
+            fi
+
+            # Write results to files (subshell can't modify parent vars)
+            echo "${TASK_ID:-n/a}" > "${WORKFLOW_DIR}/${STEP_NAME}.task_id"
+            echo "$STEP_EXIT" > "${WORKFLOW_DIR}/${STEP_NAME}.exit_code"
+        ) &
+        WAVE_PIDS["$STEP_NAME"]=$!
+    done
+
+    # Wait for all steps in this wave to complete
+    for step_name in "${!WAVE_PIDS[@]}"; do
+        wait "${WAVE_PIDS[$step_name]}" 2>/dev/null || true
+
+        STEP_EXIT="$(cat "${WORKFLOW_DIR}/${step_name}.exit_code" 2>/dev/null || echo "1")"
+        TASK_ID="$(cat "${WORKFLOW_DIR}/${step_name}.task_id" 2>/dev/null || echo "n/a")"
+        STEP_TASK_IDS["$step_name"]="$TASK_ID"
+
+        if [[ "$STEP_EXIT" -eq 0 ]]; then
+            STEP_STATUSES["$step_name"]="completed"
+            log "  COMPLETED: ${step_name} -> ${TASK_ID}"
+        else
+            STEP_STATUSES["$step_name"]="failed"
+            log "  FAILED: ${step_name} -> ${TASK_ID} (exit: ${STEP_EXIT})"
+            WORKFLOW_FAILED=true
+        fi
+
+        echo "${STEP_STATUSES[$step_name]}" > "${WORKFLOW_DIR}/${step_name}.status"
+    done
+
+    unset WAVE_PIDS
 done
 
 # --- Workflow summary ---
@@ -283,18 +383,18 @@ done
 log ""
 log "=== Workflow Summary ==="
 
-# Write summary file
 {
     echo "# Workflow: ${WORKFLOW_ID}"
     echo ""
-    echo "| Step | Status | Task ID |"
-    echo "|------|--------|---------|"
+    echo "| Step | Wave | Status | Task ID |"
+    echo "|------|------|--------|---------|"
     for i in "${!STEP_NAMES[@]}"; do
         NAME="${STEP_NAMES[$i]}"
+        WAVE="${STEP_WAVE[$NAME]}"
         STATUS="${STEP_STATUSES[$NAME]:-unknown}"
         TID="${STEP_TASK_IDS[$NAME]:-n/a}"
-        echo "| ${NAME} | ${STATUS} | ${TID} |"
-        log "  ${NAME}: ${STATUS} (${TID})"
+        echo "| ${NAME} | ${WAVE} | ${STATUS} | ${TID} |"
+        log "  ${NAME} (wave ${WAVE}): ${STATUS} (${TID})"
     done
 } > "${WORKFLOW_DIR}/summary.md"
 
