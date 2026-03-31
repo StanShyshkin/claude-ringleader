@@ -59,15 +59,25 @@ ${CLAUDE_PLUGIN_ROOT}/bin/cost.sh --today
 
 ## Model Selection
 
-Choose a model based on task complexity:
+Choose a model based on task complexity and worker:
+
+**Codex** (`-w codex`, default):
 
 | Model | Best For | Speed |
 |---|---|---|
-| `gpt-5.4` | Default. Complex tasks, multi-file changes, reasoning-heavy work | Standard |
-| `gpt-5.4-mini` | Simple fixes, cleanup, renames, straightforward implementation | Fast |
-| `gpt-5.3-codex` | Complex software engineering, architecture-sensitive coding | Standard |
+| `gpt-5.4` | Default. Complex tasks, multi-file changes | Standard |
+| `gpt-5.4-mini` | Simple fixes, cleanup, renames | Fast |
+| `gpt-5.3-codex` | Complex software engineering | Standard |
 
-Model availability changes frequently. If unsure what's available, check `~/.codex/models_cache.json`. When in doubt, omit `-m` and use the default.
+**Gemini** (`-w gemini`):
+
+| Model | Best For | Speed |
+|---|---|---|
+| `gemini-3-flash-preview` | Default. Fast general-purpose coding | Fast |
+| `gemini-2.5-pro` | Complex tasks, deeper reasoning | Slower |
+| `gemini-2.5-flash` | Simple tasks, quick responses | Fast |
+
+Model availability changes frequently. If unsure what's available, check `~/.codex/models_cache.json` (codex) or Gemini CLI docs. When in doubt, omit `-m`.
 
 ## Validating Results
 

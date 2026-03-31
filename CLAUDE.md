@@ -113,29 +113,41 @@ For implementation tasks that modify files, use the default freeform output.
 
 Use `-m MODEL` to choose a model based on task complexity:
 
+**Codex workers** (`-w codex`, default):
+
 | Model | Best For | Speed |
 |---|---|---|
 | `gpt-5.4` | Default. Complex tasks, multi-file changes, reasoning-heavy work | Standard |
 | `gpt-5.4-mini` | Simple fixes, cleanup, renames, straightforward implementation | Fast |
 | `gpt-5.3-codex` | Complex software engineering, architecture-sensitive coding | Standard |
 
+**Gemini workers** (`-w gemini`):
+
+| Model | Best For | Speed |
+|---|---|---|
+| `gemini-3-flash-preview` | Default. Fast general-purpose coding | Fast |
+| `gemini-2.5-pro` | Complex tasks, deeper reasoning | Slower |
+| `gemini-2.5-flash` | Simple tasks, quick responses | Fast |
+
 Examples:
 ```bash
 bin/delegate.sh -m gpt-5.4-mini -d /project "Rename variable foo to bar in src/utils.ts"
 bin/delegate.sh -m gpt-5.3-codex -d /project "Implement rate limiter with sliding window"
-bin/delegate.sh -d /project "Standard task"                    # Uses default from config
+bin/delegate.sh -w gemini -m gemini-2.5-pro -d /project "Complex refactoring task"
+bin/delegate.sh -w gemini -d /project "Simple task with Gemini"
+bin/delegate.sh -d /project "Standard task"                    # Uses default worker + model
 ```
 
-Omit `-m` to use the default model from `~/.codex/config.toml`.
+Omit `-m` to use the default model from `~/.codex/config.toml` (codex) or `~/.gemini/settings.json` (gemini).
 
-Model availability changes frequently. If unsure what models are available, check `~/.codex/models_cache.json` before choosing. When in doubt, omit `-m`.
+Model availability changes frequently. If unsure what models are available, check `~/.codex/models_cache.json` (codex) or Gemini CLI docs (gemini). When in doubt, omit `-m`.
 
 ### Workers
 
 Workers live in `bin/workers/`. Each implements a standard interface:
 - **codex.sh** -- Codex CLI via `codex exec` (default)
 - **codex-review.sh** -- Codex CLI code review via `codex review`
-- **gemini.sh** -- Gemini CLI (stub, not yet implemented)
+- **gemini.sh** -- Gemini CLI via headless mode (`gemini -p`)
 
 To add a new worker, create `bin/workers/<name>.sh` implementing the interface
 documented in `bin/workers/codex.sh`, then use it with `bin/delegate.sh -w <name>`.
