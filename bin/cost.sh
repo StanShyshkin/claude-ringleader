@@ -10,6 +10,7 @@ set -euo pipefail
 #   --days N       Tasks from last N days
 #   --worker NAME  Filter by worker
 #   --json         Machine-readable JSON output
+#   --no-cost      Suppress dollar cost estimates (show tokens only)
 #
 # Cost rates (override via environment variables):
 #   COST_INPUT_PER_M     (default: 2.50)  $/1M input tokens
@@ -24,6 +25,7 @@ ARTIFACTS_DIR="${DATA_DIR}/artifacts"
 DAYS=""
 WORKER_FILTER=""
 JSON_MODE=false
+NO_COST=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
         --days)   DAYS="$2"; shift 2 ;;
         --worker) WORKER_FILTER="$2"; shift 2 ;;
         --json)   JSON_MODE=true; shift ;;
+        --no-cost) NO_COST=true; shift ;;
         -*)       echo "ERROR: Unknown option: $1" >&2; exit 1 ;;
         *)        break ;;
     esac
@@ -69,6 +72,7 @@ fi
 # Pass filters to python via environment
 export WORKER_FILTER="${WORKER_FILTER}"
 export JSON_MODE="${JSON_MODE}"
+export NO_COST="${NO_COST}"
 
 # Aggregate using python3
 python3 -c "
@@ -77,6 +81,7 @@ import json, sys, os
 files = sys.argv[1:]
 worker_filter = os.environ.get('WORKER_FILTER', '')
 json_mode = os.environ.get('JSON_MODE', 'false') == 'true'
+no_cost = os.environ.get('NO_COST', 'false') == 'true'
 
 input_rate = float(os.environ.get('COST_INPUT_PER_M', '2.50'))
 cached_rate = float(os.environ.get('COST_CACHED_INPUT_PER_M', '1.25'))
@@ -129,13 +134,14 @@ if json_mode:
         'input_tokens': total_input,
         'cached_input_tokens': total_cached,
         'output_tokens': total_output,
-        'estimated_cost_usd': round(cost, 4),
-        'rates': {
+    }
+    if not no_cost:
+        result['estimated_cost_usd'] = round(cost, 4)
+        result['rates'] = {
             'input_per_m': input_rate,
             'cached_input_per_m': cached_rate,
             'output_per_m': output_rate
         }
-    }
     print(json.dumps(result, indent=2))
 else:
     sorted_dates = sorted(dates)
@@ -151,7 +157,8 @@ else:
     print(f'  Input tokens:   {total_input:>12,}')
     print(f'  Cached tokens:  {total_cached:>12,}')
     print(f'  Output tokens:  {total_output:>12,}')
-    print()
-    print(f'  Est. cost:      \${cost:>11,.4f}')
-    print(f'  (rates: \${input_rate}/M input, \${cached_rate}/M cached, \${output_rate}/M output)')
+    if not no_cost:
+        print()
+        print(f'  Est. cost:      \${cost:>11,.4f}')
+        print(f'  (rates: \${input_rate}/M input, \${cached_rate}/M cached, \${output_rate}/M output)')
 " "${META_FILES[@]}"

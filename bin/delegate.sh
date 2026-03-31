@@ -102,6 +102,9 @@ fi
 ARTIFACT_DIR="${DATA_DIR}/artifacts/${TASK_ID}"
 mkdir -p "$ARTIFACT_DIR"
 
+# P1: Write task ID immediately so background callers can discover it
+echo "$TASK_ID" > "${DATA_DIR}/.last-task-id"
+
 LOG_FILE="${DATA_DIR}/logs/${TASK_ID}.jsonl"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -115,6 +118,7 @@ cleanup() {
             echo "failed" > "${ARTIFACT_DIR}/status.tmp"
             mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
             echo "$rc" > "${ARTIFACT_DIR}/exit_code"
+            rm -f "${ARTIFACT_DIR}/pid"
         fi
     fi
 }
@@ -161,6 +165,7 @@ done
 # Mark as running
 echo "running" > "${ARTIFACT_DIR}/status.tmp"
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
+echo "$$" > "${ARTIFACT_DIR}/pid"
 
 [[ "$QUIET" == false ]] && echo "Task ${TASK_ID} started (worker: ${WORKER}, timeout: ${TIMEOUT}s, dir: ${WORKING_DIR}${MODEL:+, model: ${MODEL}})" >&2
 
@@ -252,6 +257,7 @@ else
     echo "failed" > "${ARTIFACT_DIR}/status.tmp"
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
+rm -f "${ARTIFACT_DIR}/pid"
 
 # Write meta.json (TOKEN_USAGE comes from worker's stdout, accumulated across retries)
 EMPTY_JSON="{}"

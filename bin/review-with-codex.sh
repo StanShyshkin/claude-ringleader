@@ -103,6 +103,7 @@ echo "$PROMPT" > "${ARTIFACT_DIR}/prompt.md"
 # Mark as running
 echo "running" > "${ARTIFACT_DIR}/status.tmp"
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
+echo "$$" > "${ARTIFACT_DIR}/pid"
 
 [[ "$QUIET" == false ]] && echo "Review ${TASK_ID} started (dir: ${WORKING_DIR}, scope: ${REVIEW_ARGS[*]})" >&2
 
@@ -121,6 +122,7 @@ else
     echo "failed" > "${ARTIFACT_DIR}/status.tmp"
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
+rm -f "${ARTIFACT_DIR}/pid"
 
 # Write meta.json
 cat > "${ARTIFACT_DIR}/meta.json" <<EOF

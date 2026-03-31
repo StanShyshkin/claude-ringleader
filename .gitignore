@@ -4,6 +4,9 @@ artifacts/*/
 # Event logs
 logs/*.jsonl
 
+# Last task ID (written by delegate.sh for background task discovery)
+.last-task-id
+
 # Keep directory structure
 !artifacts/.gitkeep
 !logs/.gitkeep

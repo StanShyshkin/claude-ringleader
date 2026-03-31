@@ -35,6 +35,9 @@ Use Claude Code's `run_in_background: true` on the Bash tool, then poll:
 # Start (background)
 bin/delegate.sh -d /path/to/project "Implement auth middleware"
 
+# Discover the task ID (written immediately, before worker starts)
+cat .last-task-id
+
 # Check status later
 bin/poll.sh TASK_ID
 
@@ -127,6 +130,7 @@ bin/cleanup.sh --days 3           # Remove tasks older than 3 days
 bin/cost.sh                       # Aggregate token usage and cost
 bin/cost.sh --today               # Today's usage only
 bin/cost.sh --days 7 --json       # Last 7 days, JSON output
+bin/cost.sh --no-cost             # Tokens only (skip dollar estimates)
 ```
 
 ## Reading Results
