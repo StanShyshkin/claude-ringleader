@@ -125,17 +125,16 @@ Use `-m MODEL` to choose a model based on task complexity:
 
 | Model | Best For | Speed |
 |---|---|---|
-| `gemini-3-flash-preview` | Default. Fast general-purpose coding | Fast |
-| `gemini-2.5-pro` | Complex tasks, deeper reasoning | Slower |
+| `gemini-3.1-pro-preview` | Default (Pro plan). Most capable, complex coding, on par with top models | Standard |
+| `gemini-3-flash-preview` | Fast general-purpose coding, good balance | Fast |
+| `gemini-2.5-pro` | Web development, long-context frontend tasks | Standard |
 | `gemini-2.5-flash` | Simple tasks, quick responses | Fast |
 
 Examples:
 ```bash
-bin/delegate.sh -m gpt-5.4-mini -d /project "Rename variable foo to bar in src/utils.ts"
-bin/delegate.sh -m gpt-5.3-codex -d /project "Implement rate limiter with sliding window"
-bin/delegate.sh -w gemini -m gemini-2.5-pro -d /project "Complex refactoring task"
-bin/delegate.sh -w gemini -d /project "Simple task with Gemini"
-bin/delegate.sh -d /project "Standard task"                    # Uses default worker + model
+bin/delegate.sh -m gpt-5.4-mini -d /project "Rename variable foo to bar"
+bin/delegate.sh -w gemini -d /project "Implement validation logic"
+bin/delegate.sh -w gemini -m gemini-2.5-flash -d /project "Simple cleanup"
 ```
 
 Omit `-m` to use the default model from `~/.codex/config.toml` (codex) or `~/.gemini/settings.json` (gemini).
@@ -144,12 +143,50 @@ Model availability changes frequently. If unsure what models are available, chec
 
 ### Choosing a Worker
 
-Use **codex** (default) for most tasks. Use **gemini** when codex is rate-limited, or for a second opinion on complex problems.
+Both workers are capable. Route tasks based on strengths:
 
-| Worker | Strengths |
-|---|---|
-| `codex` | Better at multi-file edits, follows project conventions, stronger tool use |
-| `gemini` | Large context window, fast for analysis tasks, alternative when codex is limited |
+| Worker | Strengths | Best For |
+|---|---|---|
+| `codex` | Multi-file edits, project convention adherence, tool use | Implementation, file modifications |
+| `gemini` | Large context window (1M tokens), analytical depth | Analysis, review, long-context tasks |
+
+### Cross-Provider QA
+
+For important work, use both providers to QA each other. Different models have different blind spots -- cross-review catches issues a single model would miss.
+
+**Pattern 1: Implement + Cross-Review**
+```bash
+# Codex implements, Gemini reviews (or vice versa)
+TASK=$(bin/delegate.sh -w codex -d /project "Implement the auth middleware")
+bin/delegate.sh -w gemini -d /project -c artifacts/$TASK/result.md "Review the implementation described in the context. Focus on correctness, edge cases, and security. List specific issues."
+```
+
+**Pattern 2: Parallel implementation + compare**
+```bash
+# Both implement the same task, Claude compares
+bin/delegate.sh -w codex -d /project -s auth-codex "Implement auth middleware"
+bin/delegate.sh -w gemini -d /project -s auth-gemini "Implement auth middleware"
+# Then read both results and pick the better approach
+```
+
+**Pattern 3: Multi-model plan review (in workflow plans)**
+```markdown
+## step: implement
+worker: codex
+task: Implement the feature
+
+## step: review-gemini
+worker: gemini
+depends_on: implement
+task: Review the implementation. List issues, edge cases, security concerns.
+
+## step: review-codex
+worker: codex
+depends_on: implement
+task: Review the implementation. Focus on correctness and test coverage.
+```
+
+Claude (Opus) remains the foreman and final arbiter -- read all reviews and decide what to act on.
 
 ### Rate Limit Handling
 

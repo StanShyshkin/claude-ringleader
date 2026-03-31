@@ -73,9 +73,12 @@ Choose a model based on task complexity and worker:
 
 | Model | Best For | Speed |
 |---|---|---|
-| `gemini-3-flash-preview` | Default. Fast general-purpose coding | Fast |
-| `gemini-2.5-pro` | Complex tasks, deeper reasoning | Slower |
+| `gemini-3.1-pro-preview` | Default (Pro). Most capable, complex coding | Standard |
+| `gemini-3-flash-preview` | Fast general-purpose coding | Fast |
+| `gemini-2.5-pro` | Web development, long-context tasks | Standard |
 | `gemini-2.5-flash` | Simple tasks, quick responses | Fast |
+
+For important work, use cross-provider QA: have one worker implement and the other review. Claude (Opus) is the final arbiter.
 
 Model availability changes frequently. If unsure what's available, check `~/.codex/models_cache.json` (codex) or Gemini CLI docs. When in doubt, omit `-m`.
 

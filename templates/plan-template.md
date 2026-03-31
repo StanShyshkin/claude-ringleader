@@ -15,13 +15,25 @@ depends_on: <step-a>, <step-b>
 task: <depends on multiple steps. Receives all dependency results as context.>
 
 ## step: <step-name>
-model: gpt-5.4-mini
-task: <simple task that can use a faster/cheaper model>
+worker: gemini
+model: gemini-2.5-flash
+task: <simple task using a specific worker and model>
 
 ## step: <step-name>
 depends_on: <step-name>
 type: review
 task: Review all changes from previous steps.
+
+## Cross-provider QA example:
+
+## step: implement
+worker: codex
+task: Implement the feature
+
+## step: review-by-gemini
+worker: gemini
+depends_on: implement
+task: Review the implementation. List issues, edge cases, security concerns.
 
 ---
 
@@ -31,7 +43,8 @@ NOTES:
 - Steps can override with their own "working_dir:" field
 - "depends_on:" supports comma-separated values for multiple dependencies
 - A step waits for all dependencies and receives their results as context
-- "model:" overrides the model per step (e.g., gpt-5.4-mini for simple tasks)
+- "worker:" sets the worker per step (codex or gemini; default: codex)
+- "model:" overrides the model per step (e.g., gpt-5.4-mini, gemini-2.5-flash)
 - "type: review" uses review-with-codex.sh instead of delegate.sh
 - Steps without dependencies run in parallel (wave-based execution)
 - Steps in the same wave start concurrently

@@ -61,6 +61,7 @@ STEP_DEPENDS=()  # comma-separated dependency list
 STEP_TYPES=()
 STEP_DIRS=()
 STEP_MODELS=()
+STEP_WORKERS=()
 
 current_step=""
 current_task=""
@@ -68,6 +69,7 @@ current_depends=""
 current_type="delegate"
 current_dir=""
 current_model=""
+current_worker=""
 in_task=false
 
 flush_step() {
@@ -83,6 +85,7 @@ flush_step() {
         STEP_TYPES+=("$current_type")
         STEP_DIRS+=("${current_dir:-$GLOBAL_WORKING_DIR}")
         STEP_MODELS+=("$current_model")
+        STEP_WORKERS+=("$current_worker")
     fi
     current_step=""
     current_task=""
@@ -90,6 +93,7 @@ flush_step() {
     current_type="delegate"
     current_dir=""
     current_model=""
+    current_worker=""
     in_task=false
 }
 
@@ -128,6 +132,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         fi
         if [[ "$line" =~ ^model:[[:space:]]*(.*) ]]; then
             current_model="${BASH_REMATCH[1]}"
+            in_task=false
+            continue
+        fi
+        if [[ "$line" =~ ^worker:[[:space:]]*(.*) ]]; then
+            current_worker="${BASH_REMATCH[1]}"
             in_task=false
             continue
         fi
@@ -266,6 +275,7 @@ if [[ "$DRY_RUN" == true ]]; then
             echo "    Type: ${STEP_TYPES[$i]}"
             echo "    Dir:  ${STEP_DIRS[$i]}"
             [[ -n "${STEP_DEPENDS[$i]}" ]] && echo "    After: ${STEP_DEPENDS[$i]}"
+            [[ -n "${STEP_WORKERS[$i]}" ]] && echo "    Worker: ${STEP_WORKERS[$i]}"
             [[ -n "${STEP_MODELS[$i]}" ]] && echo "    Model: ${STEP_MODELS[$i]}"
             echo "    Task: ${STEP_TASKS[$i]}"
         done
@@ -310,6 +320,7 @@ for wave in $(seq 0 "$MAX_WAVE"); do
         STEP_DIR="${STEP_DIRS[$i]}"
         STEP_DEPS="${STEP_DEPENDS[$i]}"
         STEP_MODEL="${STEP_MODELS[$i]}"
+        STEP_WORKER="${STEP_WORKERS[$i]}"
 
         # Check if any dependency failed -> skip
         SKIP=false
@@ -335,6 +346,8 @@ for wave in $(seq 0 "$MAX_WAVE"); do
         (
             # Build delegate command
             DELEGATE_ARGS=(-d "$STEP_DIR" -t "$TIMEOUT" -s "${STEP_NAME}" -q)
+            # Per-step worker overrides default
+            [[ -n "$STEP_WORKER" ]] && DELEGATE_ARGS+=(-w "$STEP_WORKER")
             # Per-step model overrides global -m
             if [[ -n "$STEP_MODEL" ]]; then
                 DELEGATE_ARGS+=(-m "$STEP_MODEL")
