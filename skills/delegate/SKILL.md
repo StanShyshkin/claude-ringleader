@@ -57,6 +57,18 @@ ${CLAUDE_PLUGIN_ROOT}/bin/cost.sh --today
 -q           Quiet mode
 ```
 
+## Model Selection
+
+Choose a model based on task complexity:
+
+| Model | Best For | Speed |
+|---|---|---|
+| `gpt-5.4` | Default. Complex tasks, multi-file changes, reasoning-heavy work | Standard |
+| `gpt-5.4-mini` | Simple fixes, cleanup, renames, straightforward implementation | Fast |
+| `gpt-5.3-codex` | Complex software engineering, architecture-sensitive coding | Standard |
+
+Model availability changes frequently. If unsure what's available, check `~/.codex/models_cache.json`. When in doubt, omit `-m` and use the default.
+
 ## Validating Results
 
 1. Status is `completed`

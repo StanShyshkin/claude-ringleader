@@ -97,7 +97,7 @@ Steps with `depends_on:` automatically receive their dependency's result as cont
 ### Additional delegate.sh Options
 
 ```bash
-bin/delegate.sh -m gpt-4o -d /path/to/project "task"           # Override model
+bin/delegate.sh -m gpt-5.4-mini -d /path/to/project "task"      # Override model
 bin/delegate.sh -w codex -d /path/to/project "task"             # Explicit worker (default: codex)
 bin/delegate.sh -a /path/to/shared/lib -d /project "task"       # Extra writable dir
 bin/delegate.sh -c context.md -d /project "task"                # Include context file
@@ -108,6 +108,27 @@ bin/delegate.sh -S templates/result-schema.json -d /project "task"  # Structured
 
 Note: `-S` (structured output) is best for analysis tasks (review, summarize, classify).
 For implementation tasks that modify files, use the default freeform output.
+
+### Model Selection
+
+Use `-m MODEL` to choose a model based on task complexity:
+
+| Model | Best For | Speed |
+|---|---|---|
+| `gpt-5.4` | Default. Complex tasks, multi-file changes, reasoning-heavy work | Standard |
+| `gpt-5.4-mini` | Simple fixes, cleanup, renames, straightforward implementation | Fast |
+| `gpt-5.3-codex` | Complex software engineering, architecture-sensitive coding | Standard |
+
+Examples:
+```bash
+bin/delegate.sh -m gpt-5.4-mini -d /project "Rename variable foo to bar in src/utils.ts"
+bin/delegate.sh -m gpt-5.3-codex -d /project "Implement rate limiter with sliding window"
+bin/delegate.sh -d /project "Standard task"                    # Uses default from config
+```
+
+Omit `-m` to use the default model from `~/.codex/config.toml`.
+
+Model availability changes frequently. If unsure what models are available, check `~/.codex/models_cache.json` before choosing. When in doubt, omit `-m`.
 
 ### Workers
 

@@ -15,6 +15,10 @@ depends_on: <step-a>, <step-b>
 task: <depends on multiple steps. Receives all dependency results as context.>
 
 ## step: <step-name>
+model: gpt-5.4-mini
+task: <simple task that can use a faster/cheaper model>
+
+## step: <step-name>
 depends_on: <step-name>
 type: review
 task: Review all changes from previous steps.
@@ -27,6 +31,7 @@ NOTES:
 - Steps can override with their own "working_dir:" field
 - "depends_on:" supports comma-separated values for multiple dependencies
 - A step waits for all dependencies and receives their results as context
+- "model:" overrides the model per step (e.g., gpt-5.4-mini for simple tasks)
 - "type: review" uses review-with-codex.sh instead of delegate.sh
 - Steps without dependencies run in parallel (wave-based execution)
 - Steps in the same wave start concurrently
