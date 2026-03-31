@@ -1,30 +1,25 @@
-# Claude + Codex: Multi-Agent Coding Orchestration
+# Claude + Codex + Gemini: Multi-Agent Coding Orchestration
 
-A shell-based system where **Claude Code acts as the foreman** and **Codex CLI runs as a background worker** for bounded implementation tasks. No framework, no dependencies beyond the CLIs -- just bash scripts and file-based handoff.
+A shell-based system where **Claude Code acts as the foreman** and **Codex CLI and Gemini CLI run as background workers** for bounded implementation tasks. No framework, no dependencies beyond the CLIs -- just bash scripts and file-based handoff.
 
 ## Why
 
-You talk to Claude. Claude plans, decomposes, and reviews. When there's a scoped implementation task -- write a function, fix a test, review a diff -- Claude delegates it to Codex in the background and reads the result back. You never switch tools.
+You talk to Claude. Claude plans, decomposes, and reviews. When there's a scoped implementation task -- write a function, fix a test, review a diff -- Claude delegates it to Codex or Gemini in the background and reads the result back. For important work, both providers review each other's output. You never switch tools.
 
 ## Architecture
 
 ```
 You <──> Claude Code (foreman: plans, reviews, decides)
               │
-              ├── delegate.sh ──> codex exec (worker process)
-              │                        │
-              │                        ▼
-              │                 artifacts/{task-id}/
-              │                    task.md      (input)
-              │                    result.md    (output)
-              │                    status       (running|completed|failed)
-              │                    meta.json    (timing, tokens, exit code)
-              │
-              ├── workflow.sh ──> runs multi-step plans with parallel execution
+              ├── delegate.sh ──> codex exec  ──┐
+              │                                  ├── artifacts/{task-id}/
+              ├── delegate.sh ──> gemini -p   ──┘     task.md, result.md,
+              │                                       status, meta.json
+              ├── workflow.sh ──> multi-step plans (parallel, mixed providers)
               ├── poll.sh ──────> checks task status
               ├── result.sh ────> reads task output
               ├── cost.sh ──────> aggregates token usage
-              └── review-with-codex.sh ──> delegates code review
+              └── worker-status.sh ──> rate limit monitoring
 ```
 
 ## Quick Start
@@ -33,6 +28,7 @@ You <──> Claude Code (foreman: plans, reviews, decides)
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (installed and authenticated)
 - [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`, authenticated)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`npm install -g @google/gemini-cli`, authenticated) -- optional but recommended
 - Bash 4+, Python 3 (for JSON handling in scripts)
 
 ### Setup
@@ -49,24 +45,36 @@ Add the `export PATH` line to your `~/.bashrc` or `~/.zshrc` to make it permanen
 Add this line to any project's `CLAUDE.md`:
 
 ```
-For task delegation to Codex, see ~/path/to/claude-codex-orchestrator/CLAUDE.md
+For task delegation to Codex/Gemini, see ~/path/to/claude-codex-orchestrator/CLAUDE.md
 ```
 
-Claude Code reads this and knows the full delegation system. You just talk to Claude -- "delegate this to codex" -- and it handles the rest.
+Claude Code reads this and knows the full delegation system.
 
 ## Usage
 
 ### Delegate a Task
 
 ```bash
-# Synchronous -- wait for result
+# Default (Codex)
 delegate.sh -d /path/to/project "Implement input validation in src/api/users.ts"
 
+# Use Gemini instead
+delegate.sh -w gemini -d /path/to/project "Implement input validation"
+
 # Async -- fire and check later
-delegate.sh -d /path/to/project "Fix the failing tests"  # via run_in_background
-cat .last-task-id                                          # get the task ID immediately
-poll.sh TASK_ID                                            # check status
-result.sh TASK_ID                                          # read output
+delegate.sh -d /path/to/project "Fix the failing tests"   # via run_in_background
+cat .last-task-id                                           # get task ID immediately
+poll.sh TASK_ID                                             # check status
+result.sh TASK_ID                                           # read output
+```
+
+### Cross-Provider QA
+
+Have one provider implement and the other review:
+
+```bash
+TASK=$(delegate.sh -w codex -d /project "Implement auth middleware")
+delegate.sh -w gemini -d /project -c artifacts/$TASK/result.md "Review this implementation"
 ```
 
 ### Review Code
@@ -79,33 +87,32 @@ review-with-codex.sh --commit abc123 -d /path/to/project
 
 ### Run a Multi-Step Workflow
 
-Write a plan file:
-
 ```markdown
 # Plan: Add user auth
 
 working_dir: /path/to/project
 
 ## step: schema
-task: Create the users table migration in src/db/migrations/
+worker: codex
+task: Create the users table migration
 
 ## step: middleware
+worker: gemini
 depends_on: schema
-task: Implement JWT auth middleware in src/middleware/auth.ts
+task: Implement JWT auth middleware
 
-## step: tests
+## step: review
+worker: codex
 depends_on: middleware
-task: Write tests for the auth middleware
+task: Review the auth middleware implementation
 ```
-
-Run it:
 
 ```bash
-workflow.sh plan.md                  # execute (steps run in parallel when possible)
-workflow.sh --dry-run plan.md        # preview wave assignments without executing
+workflow.sh plan.md                  # execute (parallel when possible)
+workflow.sh --dry-run plan.md        # preview wave assignments
 ```
 
-Steps without dependencies run in parallel (wave-based execution). Steps with `depends_on` automatically receive their dependency's result as context.
+Steps without dependencies run in parallel (wave-based execution). Each step can specify its own `worker:` and `model:`.
 
 ### All delegate.sh Options
 
@@ -115,7 +122,7 @@ delegate.sh [OPTIONS] -                    # read task from stdin
 
   -d DIR       Working directory (default: cwd)
   -t SECONDS   Timeout (default: 300)
-  -m MODEL     Override model (e.g. gpt-4o)
+  -m MODEL     Override model (e.g. gpt-5.4-mini, gemini-2.5-flash)
   -w WORKER    Worker: codex (default), gemini
   -r N         Retry up to N times on failure
   -S FILE      JSON schema for structured output
@@ -125,24 +132,16 @@ delegate.sh [OPTIONS] -                    # read task from stdin
   -q           Quiet mode
 ```
 
-### Chain Tasks
-
-```bash
-TASK1=$(delegate.sh -d /project "Build the schema")
-delegate.sh -d /project -c artifacts/$TASK1/result.md "Build the API using the schema"
-```
-
 ### Management
 
 ```bash
 list-tasks.sh                         # all tasks
 list-tasks.sh --running               # running only
-list-tasks.sh --failed                # failed only
 cost.sh --today                       # token usage today
 cost.sh --no-cost                     # tokens only (skip dollar estimates)
-cost.sh --days 7 --json               # last 7 days, JSON output
-cleanup.sh --dry-run                  # preview cleanup
-cleanup.sh --days 3                   # remove artifacts older than 3 days
+worker-status.sh                      # check rate limit status
+worker-status.sh --clear              # clear all lockouts
+cleanup.sh --days 3                   # remove old artifacts
 ```
 
 ## Scripts
@@ -157,18 +156,42 @@ cleanup.sh --days 3                   # remove artifacts older than 3 days
 | `list-tasks.sh` | List tasks with status, duration, filters |
 | `cost.sh` | Aggregate token usage and estimate cost |
 | `cleanup.sh` | Remove old artifacts (`--days N`, `--all`, `--dry-run`) |
+| `worker-status.sh` | Check/clear rate limit lockouts |
 
 ## Workers
 
 Workers live in `bin/workers/`. Each implements a standard interface:
 
-| Worker | Status | Backend |
+| Worker | Backend | Status |
 |---|---|---|
-| `codex.sh` | Working | Codex CLI via `codex exec` |
-| `codex-review.sh` | Working | Codex CLI via `codex review` |
-| `gemini.sh` | Stub | Gemini CLI (not yet implemented) |
+| `codex.sh` | Codex CLI via `codex exec` | Working |
+| `codex-review.sh` | Codex CLI via `codex review` | Working |
+| `gemini.sh` | Gemini CLI via headless mode (`gemini -p`) | Working |
+
+### Model Selection
+
+**Codex** (`-w codex`, default):
+
+| Model | Best For |
+|---|---|
+| `gpt-5.4` | Default. Complex tasks, multi-file changes |
+| `gpt-5.4-mini` | Simple fixes, cleanup, renames |
+| `gpt-5.3-codex` | Complex software engineering |
+
+**Gemini** (`-w gemini`):
+
+| Model | Best For |
+|---|---|
+| `gemini-3.1-pro-preview` | Default (Pro). Most capable coding model |
+| `gemini-3-flash-preview` | Fast general-purpose coding |
+| `gemini-2.5-pro` | Web development, long-context tasks |
+| `gemini-2.5-flash` | Simple tasks, quick responses |
 
 To add a new worker, create `bin/workers/<name>.sh` following the interface in `codex.sh`, then use `delegate.sh -w <name>`.
+
+## Rate Limit Handling
+
+When a worker hits a rate limit (429), delegate.sh automatically detects it and writes a lockout file. Subsequent calls to that worker fail fast with a clear error instead of wasting time. Use `worker-status.sh` to check status or switch to the other provider.
 
 ## Artifacts
 
@@ -180,7 +203,7 @@ Each task produces `artifacts/{task-id}/`:
 | `prompt.md` | Full prompt sent to worker (template + task + context) |
 | `result.md` | Worker's final output |
 | `status` | `running`, `completed`, or `failed` |
-| `meta.json` | Timing, worker, exit code, token usage |
+| `meta.json` | Timing, worker, exit code, token usage, model |
 | `stderr.log` | Error output (empty on success) |
 | `exit_code` | Numeric exit code |
 
@@ -188,12 +211,17 @@ Event logs: `logs/{task-id}.jsonl`
 
 ## Claude Code Plugin
 
-This repo includes Claude Code plugin structure (`.claude-plugin/`, `skills/`, `commands/`) for future distribution as an installable plugin with slash commands (`/delegate`, `/codex-review`, `/tasks`, `/cost`).
+This repo includes Claude Code plugin structure for distribution:
+- `.claude-plugin/plugin.json` -- plugin metadata
+- `skills/delegate/SKILL.md` -- model-invoked skill (auto-teaches Claude about delegation)
+- `commands/` -- slash commands (`/delegate`, `/codex-review`, `/tasks`, `/cost`)
+- `ORCHESTRATOR_DATA_DIR` env var support for portable artifact storage
 
 ## Design Principles
 
 - **Simple bash, no framework.** Every script is readable and self-contained.
 - **File-based handoff.** All state lives in artifact directories. No databases, no daemons.
+- **Multi-provider.** Codex and Gemini as equal workers. Claude as foreman and arbiter.
 - **Fail loudly.** `set -euo pipefail` everywhere. Errors are visible, not swallowed.
 - **Easy to debug.** Re-run any command manually. Inspect any artifact with `cat`.
 - **Stateless scripts.** No persistent processes. Each invocation is independent.
