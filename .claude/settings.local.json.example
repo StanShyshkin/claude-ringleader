@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bin/delegate.sh:*)",
+      "Bash(bin/poll.sh:*)",
+      "Bash(bin/result.sh:*)",
+      "Bash(bin/list-tasks.sh:*)",
+      "Bash(bin/review-with-codex.sh:*)",
+      "Bash(bin/cleanup.sh:*)",
+      "Bash(bin/cost.sh:*)",
+      "Bash(bin/workflow.sh:*)"
+    ]
+  }
+}
