@@ -7,6 +7,9 @@ logs/*.jsonl
 # Last task ID (written by delegate.sh for background task discovery)
 .last-task-id
 
+# Worker rate limit lockout files
+.worker-lockout-*
+
 # Keep directory structure
 !artifacts/.gitkeep
 !logs/.gitkeep

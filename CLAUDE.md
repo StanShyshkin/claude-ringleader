@@ -142,6 +142,30 @@ Omit `-m` to use the default model from `~/.codex/config.toml` (codex) or `~/.ge
 
 Model availability changes frequently. If unsure what models are available, check `~/.codex/models_cache.json` (codex) or Gemini CLI docs (gemini). When in doubt, omit `-m`.
 
+### Choosing a Worker
+
+Use **codex** (default) for most tasks. Use **gemini** when codex is rate-limited, or for a second opinion on complex problems.
+
+| Worker | Strengths |
+|---|---|
+| `codex` | Better at multi-file edits, follows project conventions, stronger tool use |
+| `gemini` | Large context window, fast for analysis tasks, alternative when codex is limited |
+
+### Rate Limit Handling
+
+If a worker hits a rate limit, delegate.sh automatically detects it and locks out that worker for the cooldown period. Subsequent calls will fail fast with a clear message instead of wasting time.
+
+```bash
+bin/worker-status.sh               # Check which workers are available
+bin/worker-status.sh --clear       # Clear all lockouts manually
+```
+
+When a worker is locked out, use the other worker:
+```bash
+# If codex is rate-limited, switch to gemini
+bin/delegate.sh -w gemini -d /project "task"
+```
+
 ### Workers
 
 Workers live in `bin/workers/`. Each implements a standard interface:

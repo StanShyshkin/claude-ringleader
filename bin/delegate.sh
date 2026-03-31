@@ -70,6 +70,22 @@ if [[ ! -x "$WORKER_SCRIPT" ]]; then
     exit 1
 fi
 
+# Check if worker is rate-limited
+LOCKOUT_FILE="${DATA_DIR}/.worker-lockout-${WORKER}"
+if [[ -f "$LOCKOUT_FILE" ]]; then
+    LOCKOUT_UNTIL="$(cat "$LOCKOUT_FILE")"
+    NOW="$(date -u +%s)"
+    if [[ "$NOW" -lt "$LOCKOUT_UNTIL" ]]; then
+        REMAINING=$(( LOCKOUT_UNTIL - NOW ))
+        echo "ERROR: Worker '${WORKER}' is rate-limited for ${REMAINING}s more." >&2
+        echo "Use a different worker (-w) or wait. Clear with: rm ${LOCKOUT_FILE}" >&2
+        exit 2
+    else
+        # Lockout expired, remove it
+        rm -f "$LOCKOUT_FILE"
+    fi
+fi
+
 # Read task description from args or stdin
 if [[ $# -eq 0 ]]; then
     echo "ERROR: No task description provided." >&2
@@ -258,6 +274,34 @@ else
 fi
 mv "${ARTIFACT_DIR}/status.tmp" "${ARTIFACT_DIR}/status"
 rm -f "${ARTIFACT_DIR}/pid"
+
+# Detect rate limiting on failure and write lockout file
+if [[ "$EXIT_CODE" -ne 0 ]]; then
+    RATE_LIMITED=false
+    LOCKOUT_SECS=60  # Default lockout: 60 seconds
+
+    # Check stderr and logs for rate limit indicators
+    STDERR_FILE="${ARTIFACT_DIR}/stderr.log"
+    if [[ -f "$STDERR_FILE" ]]; then
+        if grep -qiE '429|rate.?limit|RESOURCE_EXHAUSTED|capacity.?exhausted|Too Many Requests|exceeded.*retry.*limit' "$STDERR_FILE" 2>/dev/null; then
+            RATE_LIMITED=true
+            # Try to extract reset time from Gemini-style message ("reset after Xs")
+            RESET_SECS="$(grep -oP 'reset after \K[0-9]+' "$STDERR_FILE" 2>/dev/null | tail -1 || echo "")"
+            [[ -n "$RESET_SECS" ]] && LOCKOUT_SECS="$RESET_SECS"
+        fi
+    fi
+    if [[ "$RATE_LIMITED" == false ]] && [[ -f "$LOG_FILE" ]]; then
+        if grep -qiE '429|rate_limit_exceeded|rate.?limit' "$LOG_FILE" 2>/dev/null; then
+            RATE_LIMITED=true
+        fi
+    fi
+
+    if [[ "$RATE_LIMITED" == true ]]; then
+        LOCKOUT_UNTIL=$(( $(date -u +%s) + LOCKOUT_SECS ))
+        echo "$LOCKOUT_UNTIL" > "${DATA_DIR}/.worker-lockout-${WORKER}"
+        [[ "$QUIET" == false ]] && echo "RATE LIMITED: Worker '${WORKER}' locked out for ${LOCKOUT_SECS}s." >&2
+    fi
+fi
 
 # Write meta.json (TOKEN_USAGE comes from worker's stdout, accumulated across retries)
 EMPTY_JSON="{}"
