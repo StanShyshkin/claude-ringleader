@@ -12,8 +12,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_DIR="${PROJECT_ROOT}/artifacts"
-LOGS_DIR="${PROJECT_ROOT}/logs"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
+ARTIFACTS_DIR="${DATA_DIR}/artifacts"
+LOGS_DIR="${DATA_DIR}/logs"
 
 DAYS=7
 ALL=false

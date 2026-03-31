@@ -1,0 +1,5 @@
+{
+  "name": "codex-orchestrator",
+  "description": "Delegate bounded tasks to Codex CLI with artifact tracking, retry, parallel workflows, cost tracking, and structured output.",
+  "version": "1.0.0"
+}

@@ -18,6 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
 
 TIMEOUT=300
 MODEL=""
@@ -265,7 +266,7 @@ fi
 # --- Execute steps wave by wave ---
 
 WORKFLOW_ID="$(date -u +%Y%m%d-%H%M%S)-workflow"
-WORKFLOW_DIR="${PROJECT_ROOT}/artifacts/${WORKFLOW_ID}"
+WORKFLOW_DIR="${DATA_DIR}/artifacts/${WORKFLOW_ID}"
 mkdir -p "$WORKFLOW_DIR"
 
 declare -A STEP_TASK_IDS
@@ -333,7 +334,7 @@ for wave in $(seq 0 "$MAX_WAVE"); do
                     dep="$(echo "$dep" | xargs)"
                     DEP_TASK_ID="$(cat "${WORKFLOW_DIR}/${dep}.task_id" 2>/dev/null || echo "")"
                     if [[ -n "$DEP_TASK_ID" ]] && [[ "$DEP_TASK_ID" != "n/a" ]]; then
-                        DEP_RESULT="${PROJECT_ROOT}/artifacts/${DEP_TASK_ID}/result.md"
+                        DEP_RESULT="${DATA_DIR}/artifacts/${DEP_TASK_ID}/result.md"
                         [[ -f "$DEP_RESULT" ]] && DELEGATE_ARGS+=(-c "$DEP_RESULT")
                     fi
                 done

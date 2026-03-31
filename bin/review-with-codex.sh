@@ -18,6 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
 
 # Defaults
 WORKING_DIR="$(pwd)"
@@ -60,10 +61,10 @@ else
 fi
 
 # Create artifact directory
-ARTIFACT_DIR="${PROJECT_ROOT}/artifacts/${TASK_ID}"
+ARTIFACT_DIR="${DATA_DIR}/artifacts/${TASK_ID}"
 mkdir -p "$ARTIFACT_DIR"
 
-LOG_FILE="${PROJECT_ROOT}/logs/${TASK_ID}.jsonl"
+LOG_FILE="${DATA_DIR}/logs/${TASK_ID}.jsonl"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # Build the review prompt from template + extra instructions

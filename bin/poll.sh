@@ -13,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
 
 if [[ $# -eq 0 ]]; then
     echo "ERROR: No task ID provided." >&2
@@ -21,7 +22,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 TASK_ID="$1"
-ARTIFACT_DIR="${PROJECT_ROOT}/artifacts/${TASK_ID}"
+ARTIFACT_DIR="${DATA_DIR}/artifacts/${TASK_ID}"
 
 if [[ ! -d "$ARTIFACT_DIR" ]]; then
     echo "ERROR: Task not found: ${TASK_ID}" >&2

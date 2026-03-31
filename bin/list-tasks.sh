@@ -13,7 +13,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ARTIFACTS_DIR="${PROJECT_ROOT}/artifacts"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
+ARTIFACTS_DIR="${DATA_DIR}/artifacts"
 
 FILTER=""
 JSON_MODE=false

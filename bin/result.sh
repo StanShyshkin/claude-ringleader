@@ -13,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
 
 MODE="default"
 
@@ -35,8 +36,8 @@ if [[ $# -eq 0 ]]; then
 fi
 
 TASK_ID="$1"
-ARTIFACT_DIR="${PROJECT_ROOT}/artifacts/${TASK_ID}"
-LOG_FILE="${PROJECT_ROOT}/logs/${TASK_ID}.jsonl"
+ARTIFACT_DIR="${DATA_DIR}/artifacts/${TASK_ID}"
+LOG_FILE="${DATA_DIR}/logs/${TASK_ID}.jsonl"
 
 if [[ ! -d "$ARTIFACT_DIR" ]]; then
     echo "ERROR: Task not found: ${TASK_ID}" >&2
