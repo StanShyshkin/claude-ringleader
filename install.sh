@@ -9,7 +9,7 @@ set -euo pipefail
 #   bash install.sh
 
 INSTALL_DIR="${HOME}/.claude-ringleader"
-REPO_URL="${CLAUDE_RINGLEADER_REPO:-https://github.com/USER/claude-ringleader.git}"
+REPO_URL="${CLAUDE_RINGLEADER_REPO:-https://github.com/StanShyshkin/claude-ringleader.git}"
 
 echo "Installing claude-ringleader..."
 

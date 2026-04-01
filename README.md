@@ -33,19 +33,25 @@ You <──> Claude Code (foreman: plans, reviews, decides)
 
 ### Setup
 
+**One-command install:**
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-codex-orchestrator.git
-export PATH="$HOME/path/to/claude-codex-orchestrator/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/StanShyshkin/claude-ringleader/main/install.sh | bash
 ```
 
-Add the `export PATH` line to your `~/.bashrc` or `~/.zshrc` to make it permanent.
+**Or manual:**
+```bash
+git clone https://github.com/StanShyshkin/claude-ringleader.git ~/.claude-ringleader
+export PATH="$HOME/.claude-ringleader/bin:$PATH"
+```
 
-### Tell Claude Code About It
+The installer adds `bin/` to your PATH and configures Claude Code automatically.
+
+### Tell Claude Code About It (manual installs only)
 
 Add this line to any project's `CLAUDE.md`:
 
 ```
-For task delegation to Codex/Gemini, see ~/path/to/claude-codex-orchestrator/CLAUDE.md
+For task delegation to Codex/Gemini, see ~/.claude-ringleader/CLAUDE.md
 ```
 
 Claude Code reads this and knows the full delegation system.
