@@ -73,6 +73,24 @@ For the fix template to be used automatically, pipe it:
 cat templates/fix-prompt.md errors.txt | bin/delegate.sh -d /path/to/project -
 ```
 
+### Role-Based Delegation
+
+Use role templates to give workers domain expertise:
+
+```bash
+bin/delegate.sh -c templates/roles/security-reviewer.md -d /project "Review the auth module"
+bin/delegate.sh -c templates/roles/architect.md -d /project "Review the API layer structure"
+bin/delegate.sh -c templates/roles/test-writer.md -d /project "Write tests for src/utils.ts"
+```
+
+For adversarial reviews that challenge design decisions (not just correctness):
+
+```bash
+bin/delegate.sh -w gemini -c templates/adversarial-review-prompt.md -c artifacts/TASK_ID/result.md -d /project "Review this implementation"
+```
+
+Available roles: `security-reviewer`, `architect`, `test-writer`. Available review styles: `review-prompt` (standard), `adversarial-review-prompt` (challenges design decisions).
+
 ### Chaining Context Between Tasks
 
 Pass a previous task's result as context for the next task:
