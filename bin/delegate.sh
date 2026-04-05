@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Options:
 #   -d DIR       Working directory for the worker (default: current directory)
-#   -t SECONDS   Timeout in seconds (default: 300)
+#   -t SECONDS   Timeout in seconds (default: 1800)
 #   -s SLUG      Custom slug for task ID (default: auto-generated)
 #   -m MODEL     Override model (e.g. gpt-4o, o3)
 #   -w WORKER    Worker to use: codex (default), gemini
@@ -30,7 +30,7 @@ DATA_DIR="${ORCHESTRATOR_DATA_DIR:-${PROJECT_ROOT}}"
 
 # Defaults
 WORKING_DIR="$(pwd)"
-TIMEOUT=300
+TIMEOUT=1800
 SLUG=""
 QUIET=false
 MODEL=""
